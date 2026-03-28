@@ -1,0 +1,10 @@
+{
+  "name": "PadelFlow Ultra Local",
+  "short_name": "PadelFlow",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#09121f",
+  "theme_color": "#09121f",
+  "description": "App local de pádel con salas, parejas, jornadas, resultados, ELO, chat y clasificación.",
+  "icons": []
+}
