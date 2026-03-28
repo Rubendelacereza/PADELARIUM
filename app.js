@@ -103,20 +103,23 @@ function sanitizeRoom(room) {
     chat: Array.isArray(room.chat) ? room.chat.slice(-100).map(msg => ({ id: String(msg.id || uid('msg')), userId: String(msg.userId || ''), text: String(msg.text || '').slice(0, 180), at: Number(msg.at) || Date.now() })) : [],
     resultAudit: room.resultAudit && typeof room.resultAudit === 'object' ? room.resultAudit : {},
     createdAt: Number(room.createdAt) || Date.now(),
+    lastResultMeta: room.lastResultMeta && typeof room.lastResultMeta === 'object' ? room.lastResultMeta : null,
     settings: {
       pairMode: room.settings?.pairMode === 'balanced' ? 'balanced' : 'random'
     }
   };
 }
 
+
 function sanitizeResult(result) {
-  const clean = {};
-  ['a1','b1','a2','b2','a3','b3'].forEach(key => {
+  const clean = { a1: '', b1: '' };
+  ['a1', 'b1'].forEach(key => {
     const value = result[key];
-    clean[key] = value === '' || value === null || value === undefined ? '' : clamp(Number(value), 0, 7);
+    clean[key] = value === '' || value === null || value === undefined ? '' : Math.max(0, Math.round(Number(value)));
   });
   return clean;
 }
+
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -278,6 +281,7 @@ function createRoom(name, adminId) {
     chat: [],
     resultAudit: {},
     createdAt: Date.now(),
+    lastResultMeta: null,
     settings: { pairMode: 'random' }
   });
   state.rooms.push(room);
@@ -373,7 +377,7 @@ function renderRoom(roomId) {
   renderAdminPanel(room, isAdmin);
   renderPairs(room);
   renderStandings(room);
-  renderStats(room);
+  renderNextPending(room);
   renderMatches(room, isAdmin);
   renderHistory(room);
   renderChat(room);
@@ -385,12 +389,12 @@ function renderTopStats(room) {
   const confirmed = room.members.filter(id => room.attendance[id] !== false).length;
   const completed = countCompletedMatches(room);
   const leader = buildStandings(room)[0]?.name || '—';
-  const mvp = room.rounds.map(round => round.mvp).filter(Boolean).slice(-1)[0] || '—';
+  const pending = Math.max((room.scheduleGenerated ? 12 : 0) - completed, 0);
   wrap.innerHTML = `
     <div class="metric-card glass-lite"><strong>${confirmed}/${room.members.length}</strong><span>Asistencias OK</span></div>
     <div class="metric-card glass-lite"><strong>${completed}/${room.scheduleGenerated ? 12 : 0}</strong><span>Partidos jugados</span></div>
-    <div class="metric-card glass-lite"><strong>${escapeHtml(leader)}</strong><span>Líder actual</span></div>
-    <div class="metric-card glass-lite"><strong>${escapeHtml(mvp)}</strong><span>Último MVP</span></div>`;
+    <div class="metric-card glass-lite"><strong>${escapeHtml(leader)}</strong><span>Pareja líder</span></div>
+    <div class="metric-card glass-lite"><strong>${pending}</strong><span>Partidos pendientes</span></div>`;
 }
 
 function renderPlayers(room, isAdmin) {
@@ -401,14 +405,13 @@ function renderPlayers(room, isAdmin) {
 
   wrap.innerHTML = room.members.map(userId => {
     const profile = getUser(userId);
-    const stats = getComputedUserStats(userId, room);
     return `
       <article class="player-chip ${room.adminId === userId ? 'admin' : ''}">
         <div class="chip-main">
           <div class="avatar">${getInitials(profile.username)}</div>
           <div>
             <strong>${escapeHtml(profile.username)}</strong>
-            <div class="player-role">${room.adminId === userId ? 'Administrador' : getUser(userId).isGuest ? 'Jugador local' : 'Jugador'} · ${stats.level}</div>
+            <div class="player-role">${room.adminId === userId ? 'Administrador' : getUser(userId).isGuest ? 'Jugador local' : 'Jugador'}</div>
           </div>
         </div>
         <div class="chip-row">
@@ -520,6 +523,7 @@ function renderAdminPanel(room, isAdmin) {
         <button id="generatePairsBtn" class="btn btn-primary" type="button" ${canGeneratePairs ? '' : 'disabled'}>Generar 6 parejas</button>
         <button id="generateScheduleBtn" class="btn btn-secondary" type="button" ${canGenerateSchedule ? '' : 'disabled'}>Crear 4 jornadas</button>
         <button id="resetTournamentBtn" class="btn btn-warning" type="button" ${hasResults ? 'disabled' : ''}>Rehacer torneo</button>
+        <button id="undoLastResultBtn" class="btn btn-ghost" type="button" ${room.lastResultMeta ? "" : "disabled"}>Deshacer último resultado</button>
       </div>
 
       <div class="card glass-lite stack-md">
@@ -548,6 +552,7 @@ function renderAdminPanel(room, isAdmin) {
   document.getElementById('generatePairsBtn').addEventListener('click', () => generatePairs(room.id));
   document.getElementById('generateScheduleBtn').addEventListener('click', () => generateSchedule(room.id));
   document.getElementById('resetTournamentBtn').addEventListener('click', () => resetTournament(room.id));
+  document.getElementById('undoLastResultBtn').addEventListener('click', () => undoLastResult(room.id));
   wrap.querySelectorAll('.promote-admin-btn').forEach(btn => btn.addEventListener('click', () => changeAdmin(room.id, btn.dataset.userId)));
 }
 
@@ -569,104 +574,78 @@ function renderPairs(room) {
     </article>`).join('');
 }
 
+
 function renderStandings(room) {
   const podiumWrap = document.getElementById('standingsPodium');
   const tableWrap = document.getElementById('standingsTable');
   const standings = buildStandings(room);
 
-  if (!standings.length) {
+  if (!room.pairsGenerated || !room.pairs.length) {
     podiumWrap.innerHTML = '';
-    tableWrap.innerHTML = '<div class="empty-state">La clasificación aparecerá cuando existan resultados válidos.</div>';
+    tableWrap.innerHTML = '<div class="empty-state">La clasificación por parejas aparecerá cuando generes las parejas.</div>';
     return;
   }
 
   const top3 = standings.slice(0, 3);
-  podiumWrap.innerHTML = `<div class="podium">${top3.map((item, idx) => `
+  podiumWrap.innerHTML = top3.length ? `<div class="podium pair-podium">${top3.map((item, idx) => `
     <div class="podium-card ${idx === 0 ? 'first' : idx === 1 ? 'second' : 'third'}">
       <div class="meta-note">#${idx + 1}</div>
       <strong>${escapeHtml(item.name)}</strong>
       <div>${item.points} pts</div>
-      <small>${item.wins}V · ${item.losses}D</small>
-    </div>`).join('')}</div>`;
+      <small>${item.wins}V · ${item.draws}E · ${item.losses}D</small>
+    </div>`).join('')}</div>` : '';
 
-  tableWrap.innerHTML = `
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr><th>#</th><th>Jugador</th><th>Pts</th><th>V</th><th>D</th><th>Sets</th><th>Juegos</th><th>ELO</th></tr>
-        </thead>
-        <tbody>
-          ${standings.map((item, index) => `
-            <tr>
-              <td>${index + 1}</td>
-              <td>${escapeHtml(item.name)}</td>
-              <td>${item.points}</td>
-              <td>${item.wins}</td>
-              <td>${item.losses}</td>
-              <td>${item.setsWon}-${item.setsLost}</td>
-              <td>${item.gamesWon}-${item.gamesLost}</td>
-              <td>${item.elo}</td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>`;
-}
-
-function renderStats(room) {
-  const eloBoard = document.getElementById('eloBoard');
-  const wrap = document.getElementById('playerStatsGrid');
-  const profiles = room.members.map(userId => getComputedUserStats(userId, room)).sort((a, b) => b.elo - a.elo || b.wins - a.wins || a.name.localeCompare(b.name));
-  eloBoard.innerHTML = `
-    <div class="stack-md">
-      <div class="section-title-row wrap-mobile">
-        <h4>Ranking ELO y progreso</h4>
-        <span class="subtle">Se actualiza con cada resultado</span>
-      </div>
-      <div class="elo-grid">
-        ${profiles.slice(0, 8).map((profile, index) => `
-          <div class="elo-card">
-            <strong>#${index + 1} · ${escapeHtml(profile.name)}</strong>
-            <div class="meta-note">${profile.level}</div>
-            <b>${profile.elo}</b>
-            <div class="progress-bar" aria-hidden="true"><span style="width:${profile.levelProgress}%"></span></div>
-          </div>`).join('')}
-      </div>
-    </div>`;
-
-  wrap.innerHTML = profiles.map(profile => `
-    <article class="player-profile-card stack-md">
-      <div class="player-row wrap-mobile">
-        <div class="chip-main">
-          <div class="avatar">${getInitials(profile.name)}</div>
-          <div>
-            <strong>${escapeHtml(profile.name)}</strong>
-            <div class="player-role">Mejor pareja: ${escapeHtml(profile.bestPartner || 'Sin datos')}</div>
-          </div>
+  tableWrap.innerHTML = `<div class="pair-standings-list mobile-clean-list">${standings.map((item, index) => `
+    <article class="pair-standing-card ${index < 3 ? 'top' : ''}">
+      <div class="pair-standing-rank">${index + 1}</div>
+      <div class="pair-standing-main">
+        <div class="pair-standing-name">${escapeHtml(item.name)}</div>
+        <div class="pair-standing-chips">
+          <span class="tiny-pill">${item.points} pts</span>
+          <span class="tiny-pill">${item.played} PJ</span>
+          <span class="tiny-pill">${item.wins}V</span>
+          <span class="tiny-pill">${item.draws}E</span>
+          <span class="tiny-pill">${item.losses}D</span>
         </div>
-        <span class="level-pill">${profile.level}</span>
       </div>
-
-      <div class="stat-line">
-        <div class="mini-stat"><strong>${profile.played}</strong><span>PJ</span></div>
-        <div class="mini-stat"><strong>${profile.wins}</strong><span>PG</span></div>
-        <div class="mini-stat"><strong>${profile.losses}</strong><span>PP</span></div>
+      <div class="pair-standing-side compact">
+        <span>Juegos: ${item.gamesWon}-${item.gamesLost}</span>
+        <span>Dif: ${item.gamesDiff >= 0 ? '+' : ''}${item.gamesDiff}</span>
       </div>
-      <div class="stat-line">
-        <div class="mini-stat"><strong>${profile.winRate}%</strong><span>Win rate</span></div>
-        <div class="mini-stat"><strong>${profile.gamesDiff > 0 ? '+' : ''}${profile.gamesDiff}</strong><span>Dif juegos</span></div>
-        <div class="mini-stat"><strong>${profile.elo}</strong><span>ELO</span></div>
-      </div>
-      <div class="progress-bar" aria-label="Progreso de nivel"><span style="width:${profile.levelProgress}%"></span></div>
-      <div class="meta-note">Racha: ${profile.streak}</div>
-      <div class="achievements-grid">
-        ${ACHIEVEMENTS.map(achievement => `
-          <div class="achievement-card ${profile.achievementIds.includes(achievement.id) ? 'unlocked' : 'locked'}">
-            <strong>${escapeHtml(achievement.title)}</strong>
-            <small>${escapeHtml(achievement.desc)}</small>
-          </div>`).join('')}
-      </div>
-    </article>`).join('');
+    </article>`).join('')}</div>`;
 }
+
+function renderNextPending(room) {
+  const wrap = document.getElementById('nextPendingWrap');
+  if (!wrap) return;
+  if (!room.scheduleGenerated) {
+    wrap.innerHTML = '';
+    return;
+  }
+  const next = room.rounds.flatMap(round => round.matches.map(match => ({ round: round.number, match }))).find(item => !item.match.result);
+  if (!next) {
+    wrap.innerHTML = '<div class="next-match-card glass-lite done"><strong>Todos los partidos tienen resultado.</strong><div class="meta-note">Puedes revisar la clasificación final o copiar el resumen.</div></div>';
+    return;
+  }
+  const pairA = room.pairs.find(pair => pair.id === next.match.pairAId);
+  const pairB = room.pairs.find(pair => pair.id === next.match.pairBId);
+  wrap.innerHTML = `
+    <div class="next-match-card glass-lite">
+      <div>
+        <div class="eyebrow">Nueva funcionalidad</div>
+        <strong>Siguiente partido pendiente</strong>
+        <div class="meta-note">Jornada ${next.round} · Pista ${next.match.court}</div>
+        <div class="next-match-teams">${escapeHtml(pairA.playerIds.map(getUsername).join(' + '))} <span>vs</span> ${escapeHtml(pairB.playerIds.map(getUsername).join(' + '))}</div>
+      </div>
+      <button class="btn btn-primary btn-small" type="button" id="jumpNextMatchBtn">Ir al partido</button>
+    </div>`;
+  const btn = document.getElementById('jumpNextMatchBtn');
+  if (btn) btn.addEventListener('click', () => {
+    const target = document.querySelector(`[data-match-id="${next.match.id}"]`);
+    if (target) target.scrollIntoView({ behavior: document.documentElement.dataset.motion === 'reduced' ? 'auto' : 'smooth', block: 'center' });
+  });
+}
+
 
 function renderMatches(room, isAdmin) {
   const wrap = document.getElementById('matchesBoard');
@@ -680,7 +659,7 @@ function renderMatches(room, isAdmin) {
       <div class="round-title wrap-mobile">
         <div>
           <strong>Jornada ${round.number}</strong>
-          <div class="meta-note">3 pistas simultáneas</div>
+          <div class="meta-note">3 pistas simultáneas${round.mvp ? ` · MVP ${escapeHtml(round.mvp)}` : ''}</div>
         </div>
         <span class="tiny-pill">${round.matches.filter(match => match.result).length}/3 cerrados</span>
       </div>
@@ -689,34 +668,55 @@ function renderMatches(room, isAdmin) {
           const pairA = room.pairs.find(pair => pair.id === match.pairAId);
           const pairB = room.pairs.find(pair => pair.id === match.pairBId);
           const resultText = match.result ? summarizeResult(match.result) : 'Pendiente';
+          const drawClass = match.result && Number(match.result.a1) === Number(match.result.b1) ? 'draw' : '';
           return `
-            <article class="match-card ${match.result ? 'done' : ''}">
+            <article class="match-card ${match.result ? 'done' : ''} ${drawClass}">
               <div class="match-line wrap-mobile">
                 <div>
                   <strong>Pista ${match.court}</strong>
-                  <div class="meta-note">${pairA.playerIds.map(getUsername).join(' + ')} vs ${pairB.playerIds.map(getUsername).join(' + ')}</div>
+                  <div class="meta-note">${escapeHtml(pairA.playerIds.map(getUsername).join(' + '))} vs ${escapeHtml(pairB.playerIds.map(getUsername).join(' + '))}</div>
                 </div>
-                <span class="result-badge">${escapeHtml(resultText)}</span>
+                <span class="result-badge ${drawClass}">${escapeHtml(resultText)}</span>
               </div>
               ${isAdmin ? `
-                <form class="score-form" data-match-id="${match.id}">
-                  <div class="score-grid">
-                    <input name="a1" inputmode="numeric" aria-label="Set 1 pareja A" placeholder="A1" value="${valueForInput(match.result?.a1)}">
-                    <input name="b1" inputmode="numeric" aria-label="Set 1 pareja B" placeholder="B1" value="${valueForInput(match.result?.b1)}">
-                    <input name="a2" inputmode="numeric" aria-label="Set 2 pareja A" placeholder="A2" value="${valueForInput(match.result?.a2)}">
-                    <input name="b2" inputmode="numeric" aria-label="Set 2 pareja B" placeholder="B2" value="${valueForInput(match.result?.b2)}">
-                    <input name="a3" inputmode="numeric" aria-label="Set 3 pareja A" placeholder="A3" value="${valueForInput(match.result?.a3)}">
-                    <input name="b3" inputmode="numeric" aria-label="Set 3 pareja B" placeholder="B3" value="${valueForInput(match.result?.b3)}">
+                <form class="score-form score-form-single-set" data-match-id="${match.id}">
+                  <div class="score-sheet-single cleaner-mobile-score">
+                    <div class="single-set-chip">1 set libre · se permite empate</div>
+                    <div class="score-stack-team team-a">
+                      <div class="score-team-label">Pareja 1</div>
+                      <div class="score-team-name">${escapeHtml(pairA.playerIds.map(getUsername).join(' + '))}</div>
+                      <div class="quick-score-grid">
+                        <button class="quick-step" type="button" data-score-adjust="-1" data-score-target="a1">−</button>
+                        <input name="a1" inputmode="numeric" min="0" aria-label="Juegos de ${pairA.playerIds.map(getUsername).join(' y ')}" placeholder="0" value="${valueForInput(match.result?.a1)}">
+                        <button class="quick-step" type="button" data-score-adjust="1" data-score-target="a1">+</button>
+                      </div>
+                      <div class="preset-row">
+                        ${[4,5,6,7,10].map(v => `<button class="preset-score-btn" type="button" data-score-value="${v}" data-score-target="a1">${v}</button>`).join('')}
+                      </div>
+                    </div>
+                    <div class="score-vs big">VS</div>
+                    <div class="score-stack-team team-b">
+                      <div class="score-team-label">Pareja 2</div>
+                      <div class="score-team-name">${escapeHtml(pairB.playerIds.map(getUsername).join(' + '))}</div>
+                      <div class="quick-score-grid">
+                        <button class="quick-step" type="button" data-score-adjust="-1" data-score-target="b1">−</button>
+                        <input name="b1" inputmode="numeric" min="0" aria-label="Juegos de ${pairB.playerIds.map(getUsername).join(' y ')}" placeholder="0" value="${valueForInput(match.result?.b1)}">
+                        <button class="quick-step" type="button" data-score-adjust="1" data-score-target="b1">+</button>
+                      </div>
+                      <div class="preset-row">
+                        ${[4,5,6,7,10].map(v => `<button class="preset-score-btn" type="button" data-score-value="${v}" data-score-target="b1">${v}</button>`).join('')}
+                      </div>
+                    </div>
                   </div>
-                  <div class="inline-actions">
-                    <button class="btn btn-primary btn-small" type="submit">Guardar</button>
+                  <div class="meta-note">Puedes escribir cualquier número de juegos y también dejar empate, por ejemplo 5-5.</div>
+                  <div class="inline-actions sticky-actions-mobile">
+                    <button class="btn btn-primary btn-small" type="submit">Guardar resultado</button>
                     ${match.result ? `<button class="btn btn-ghost btn-small clear-score-btn" data-match-id="${match.id}" type="button">Borrar</button>` : ''}
                   </div>
                 </form>` : ''}
             </article>`;
         }).join('')}
       </div>
-      <div class="round-mvp meta-note">MVP: <strong>${escapeHtml(round.mvp || 'Pendiente')}</strong></div>
     </article>`).join('');
 
   if (isAdmin) {
@@ -725,7 +725,26 @@ function renderMatches(room, isAdmin) {
       saveMatchResult(room.id, form.dataset.matchId, new FormData(form));
     }));
     wrap.querySelectorAll('.clear-score-btn').forEach(btn => btn.addEventListener('click', () => clearMatchResult(room.id, btn.dataset.matchId)));
+    wrap.querySelectorAll('.quick-step').forEach(btn => btn.addEventListener('click', () => adjustScoreInput(btn)));
+    wrap.querySelectorAll('.preset-score-btn').forEach(btn => btn.addEventListener('click', () => setScoreInput(btn)));
   }
+}
+
+
+function adjustScoreInput(button) {
+  const form = button.closest('form');
+  const input = form?.querySelector(`input[name="${button.dataset.scoreTarget}"]`);
+  if (!input) return;
+  const current = Number(input.value || 0);
+  const next = Math.max(0, current + Number(button.dataset.scoreAdjust || 0));
+  input.value = String(next);
+}
+
+function setScoreInput(button) {
+  const form = button.closest('form');
+  const input = form?.querySelector(`input[name="${button.dataset.scoreTarget}"]`);
+  if (!input) return;
+  input.value = button.dataset.scoreValue || '0';
 }
 
 function renderHistory(room) {
@@ -818,6 +837,7 @@ function addManualPlayer(roomId, rawName) {
     room.pairsGenerated = false;
     room.scheduleGenerated = false;
     room.resultAudit = {};
+    room.lastResultMeta = null;
     addHistory(room, 'Torneo reiniciado por cambio de participantes.');
     notifyRoom(room, 'Torneo reiniciado', 'Se han borrado parejas y jornadas para mantener la consistencia.');
   }
@@ -982,6 +1002,7 @@ function resetTournament(roomId) {
   room.pairsGenerated = false;
   room.scheduleGenerated = false;
   room.resultAudit = {};
+  room.lastResultMeta = null;
   addHistory(room, 'El administrador ha rehecho el torneo antes de iniciar resultados.');
   notifyRoom(room, 'Torneo rehecho', 'Se han borrado parejas y jornadas para volver a empezar.');
   saveState();
@@ -1005,14 +1026,18 @@ function saveMatchResult(roomId, matchId, formData) {
   const match = findMatch(room, matchId);
   if (!match) return;
   const previousResult = match.result ? sanitizeResult(match.result) : null;
-  const result = sanitizeResult(Object.fromEntries(['a1','b1','a2','b2','a3','b3'].map(key => [key, String(formData.get(key) || '').trim() === '' ? '' : Number(formData.get(key))])));
+  const result = sanitizeResult({
+    a1: String(formData.get('a1') || '').trim() === '' ? '' : Number(formData.get('a1')),
+    b1: String(formData.get('b1') || '').trim() === '' ? '' : Number(formData.get('b1'))
+  });
 
-  if (!isValidMatchResult(result)) return toast('Introduce al menos 2 sets válidos y sin empates.');
+  if (!isValidMatchResult(result)) return toast('Introduce los juegos de ambas parejas.');
 
   if (previousResult) rollbackMatchImpact(room, match);
   match.result = result;
   applyMatchImpact(room, match, result);
   updateRoomMvps(room);
+  room.lastResultMeta = { matchId: match.id, savedAt: Date.now() };
   addHistory(room, `Resultado guardado en jornada ${findRoundNumber(room, match.id)} pista ${match.court}: ${summarizeResult(result)}.`);
   notifyRoom(room, 'Resultado actualizado', `Se ha cerrado un partido de la jornada ${findRoundNumber(room, match.id)}.`);
   saveState();
@@ -1028,6 +1053,7 @@ function clearMatchResult(roomId, matchId) {
   rollbackMatchImpact(room, match);
   match.result = null;
   updateRoomMvps(room);
+  if (room.lastResultMeta?.matchId === match.id) room.lastResultMeta = null;
   addHistory(room, `Resultado eliminado en jornada ${findRoundNumber(room, match.id)} pista ${match.court}.`);
   notifyRoom(room, 'Resultado borrado', 'Un partido ha vuelto a quedar pendiente.');
   saveState();
@@ -1035,47 +1061,50 @@ function clearMatchResult(roomId, matchId) {
   toast('Resultado borrado.');
 }
 
+
 function isValidMatchResult(result) {
-  const sets = [['a1','b1'],['a2','b2'],['a3','b3']].map(([a, b]) => [result[a], result[b]]).filter(([a, b]) => a !== '' && b !== '');
-  if (sets.length < 2) return false;
-  if (sets.some(([a, b]) => a === b)) return false;
-  const { setsA, setsB } = countSets(result);
-  return setsA !== setsB;
+  if (result.a1 === '' || result.b1 === '') return false;
+  if (!Number.isFinite(Number(result.a1)) || !Number.isFinite(Number(result.b1))) return false;
+  return Number(result.a1) >= 0 && Number(result.b1) >= 0;
 }
+
+
 
 function applyMatchImpact(room, match, result) {
   const pairA = room.pairs.find(pair => pair.id === match.pairAId);
   const pairB = room.pairs.find(pair => pair.id === match.pairBId);
   const { setsA, setsB, gamesA, gamesB } = countSets(result);
-  const winner = setsA > setsB ? 'A' : 'B';
+  const winner = gamesA === gamesB ? null : (gamesA > gamesB ? 'A' : 'B');
   const avgA = average(pairA.playerIds.map(getUserElo));
   const avgB = average(pairB.playerIds.map(getUserElo));
   const expectedA = 1 / (1 + Math.pow(10, (avgB - avgA) / 400));
   const expectedB = 1 - expectedA;
-  const scoreA = winner === 'A' ? 1 : 0;
-  const scoreB = 1 - scoreA;
+  const scoreA = winner === null ? 0.5 : (winner === 'A' ? 1 : 0);
+  const scoreB = winner === null ? 0.5 : (winner === 'B' ? 1 : 0);
   const deltaA = Math.round(24 * (scoreA - expectedA));
   const deltaB = Math.round(24 * (scoreB - expectedB));
   const audit = { users: {} };
 
-  const updatePlayer = (userId, won, setsWon, setsLost, gamesWon, gamesLost, delta, partnerId) => {
+  const updatePlayer = (userId, outcome, setsWon, setsLost, gamesWon, gamesLost, delta, partnerId) => {
     const user = getUser(userId);
     user.elo += delta;
     user.stats.played += 1;
-    user.stats.wins += won ? 1 : 0;
-    user.stats.losses += won ? 0 : 1;
+    user.stats.wins += outcome === 'W' ? 1 : 0;
+    user.stats.losses += outcome === 'L' ? 1 : 0;
     user.stats.setsWon += setsWon;
     user.stats.setsLost += setsLost;
     user.stats.gamesWon += gamesWon;
     user.stats.gamesLost += gamesLost;
-    user.stats.recent.push(won ? 'W' : 'L');
+    user.stats.recent.push(outcome);
     user.stats.recent = user.stats.recent.slice(-10);
     user.stats.bestPartnerCount[partnerId] = (user.stats.bestPartnerCount[partnerId] || 0) + 1;
-    audit.users[userId] = { won, setsWon, setsLost, gamesWon, gamesLost, delta, partnerId };
+    audit.users[userId] = { outcome, setsWon, setsLost, gamesWon, gamesLost, delta, partnerId };
   };
 
-  pairA.playerIds.forEach(userId => updatePlayer(userId, winner === 'A', setsA, setsB, gamesA, gamesB, deltaA, pairA.playerIds.find(id => id !== userId)));
-  pairB.playerIds.forEach(userId => updatePlayer(userId, winner === 'B', setsB, setsA, gamesB, gamesA, deltaB, pairB.playerIds.find(id => id !== userId)));
+  const outcomeA = winner === null ? 'D' : (winner === 'A' ? 'W' : 'L');
+  const outcomeB = winner === null ? 'D' : (winner === 'B' ? 'W' : 'L');
+  pairA.playerIds.forEach(userId => updatePlayer(userId, outcomeA, setsA, setsB, gamesA, gamesB, deltaA, pairA.playerIds.find(id => id !== userId)));
+  pairB.playerIds.forEach(userId => updatePlayer(userId, outcomeB, setsB, setsA, gamesB, gamesA, deltaB, pairB.playerIds.find(id => id !== userId)));
   room.resultAudit[match.id] = audit;
   refreshAchievements(room);
 }
@@ -1087,13 +1116,13 @@ function rollbackMatchImpact(room, match) {
     const user = getUser(userId);
     user.elo -= info.delta;
     user.stats.played = Math.max(0, user.stats.played - 1);
-    user.stats.wins = Math.max(0, user.stats.wins - (info.won ? 1 : 0));
-    user.stats.losses = Math.max(0, user.stats.losses - (info.won ? 0 : 1));
+    user.stats.wins = Math.max(0, user.stats.wins - (info.outcome === 'W' ? 1 : 0));
+    user.stats.losses = Math.max(0, user.stats.losses - (info.outcome === 'L' ? 1 : 0));
     user.stats.setsWon = Math.max(0, user.stats.setsWon - info.setsWon);
     user.stats.setsLost = Math.max(0, user.stats.setsLost - info.setsLost);
     user.stats.gamesWon = Math.max(0, user.stats.gamesWon - info.gamesWon);
     user.stats.gamesLost = Math.max(0, user.stats.gamesLost - info.gamesLost);
-    const target = info.won ? 'W' : 'L';
+    const target = info.outcome || 'D';
     const index = user.stats.recent.lastIndexOf(target);
     if (index !== -1) user.stats.recent.splice(index, 1);
     if (user.stats.bestPartnerCount[info.partnerId]) {
@@ -1113,9 +1142,13 @@ function updateRoomMvps(room) {
       const pairA = room.pairs.find(pair => pair.id === match.pairAId);
       const pairB = room.pairs.find(pair => pair.id === match.pairBId);
       const { setsA, setsB, gamesA, gamesB } = countSets(match.result);
-      const winnerPair = setsA > setsB ? pairA : pairB;
-      const winnerGames = setsA > setsB ? gamesA : gamesB;
-      winnerPair.playerIds.forEach(playerId => { tally[playerId] = (tally[playerId] || 0) + 10 + winnerGames; });
+      if (gamesA === gamesB) {
+        [...pairA.playerIds, ...pairB.playerIds].forEach(playerId => { tally[playerId] = (tally[playerId] || 0) + 5 + gamesA; });
+      } else {
+        const winnerPair = gamesA > gamesB ? pairA : pairB;
+        const winnerGames = gamesA > gamesB ? gamesA : gamesB;
+        winnerPair.playerIds.forEach(playerId => { tally[playerId] = (tally[playerId] || 0) + 10 + winnerGames; });
+      }
     });
     const bestId = Object.entries(tally).sort((a, b) => b[1] - a[1])[0]?.[0];
     round.mvp = bestId ? getUsername(bestId) : '';
@@ -1152,27 +1185,55 @@ function collectRoomEntriesForUser(room, userId) {
   return entries;
 }
 
+
 function buildStandings(room) {
-  const rows = room.members.map(userId => {
-    const stats = getComputedUserStats(userId, room);
-    return {
-      userId,
-      name: stats.name,
-      points: stats.wins * 3,
-      wins: stats.wins,
-      losses: stats.losses,
-      setsWon: stats.setsWon,
-      setsLost: stats.setsLost,
-      gamesWon: stats.gamesWon,
-      gamesLost: stats.gamesLost,
-      elo: stats.elo
-    };
-  });
-  return rows.filter(item => item.wins || item.losses).sort((a, b) => (
+  if (!room.pairsGenerated || !room.pairs.length) return [];
+  const rows = room.pairs.map(pair => ({
+    pairId: pair.id,
+    name: pair.playerIds.map(getUsername).join(' y '),
+    played: 0,
+    points: 0,
+    wins: 0,
+    draws: 0,
+    losses: 0,
+    setsWon: 0,
+    setsLost: 0,
+    gamesWon: 0,
+    gamesLost: 0,
+    gamesDiff: 0
+  }));
+  const map = Object.fromEntries(rows.map(row => [row.pairId, row]));
+
+  room.rounds.forEach(round => round.matches.forEach(match => {
+    if (!match.result) return;
+    const rowA = map[match.pairAId];
+    const rowB = map[match.pairBId];
+    if (!rowA || !rowB) return;
+    const { setsA, setsB, gamesA, gamesB } = countSets(match.result);
+    rowA.played += 1; rowB.played += 1;
+    rowA.setsWon += setsA; rowA.setsLost += setsB;
+    rowB.setsWon += setsB; rowB.setsLost += setsA;
+    rowA.gamesWon += gamesA; rowA.gamesLost += gamesB;
+    rowB.gamesWon += gamesB; rowB.gamesLost += gamesA;
+    if (gamesA > gamesB) {
+      rowA.wins += 1; rowA.points += 3;
+      rowB.losses += 1;
+    } else if (gamesB > gamesA) {
+      rowB.wins += 1; rowB.points += 3;
+      rowA.losses += 1;
+    } else {
+      rowA.draws += 1; rowB.draws += 1;
+      rowA.points += 1; rowB.points += 1;
+    }
+  }));
+
+  rows.forEach(row => { row.gamesDiff = row.gamesWon - row.gamesLost; });
+
+  return rows.sort((a, b) => (
     b.points - a.points ||
-    (b.setsWon - b.setsLost) - (a.setsWon - a.setsLost) ||
-    (b.gamesWon - b.gamesLost) - (a.gamesWon - a.gamesLost) ||
-    b.elo - a.elo ||
+    b.gamesDiff - a.gamesDiff ||
+    b.gamesWon - a.gamesWon ||
+    b.wins - a.wins ||
     a.name.localeCompare(b.name)
   ));
 }
@@ -1213,7 +1274,7 @@ function computeStreak(recent) {
     if (recent[i] !== last) break;
     count += 1;
   }
-  return `${count}${last === 'W' ? ' victorias' : ' derrotas'} seguidas`;
+  return `${count}${last === 'W' ? ' victorias' : last === 'L' ? ' derrotas' : ' empates'} seguidos`;
 }
 
 function getLevel(elo) {
@@ -1230,7 +1291,7 @@ function getLevelProgress(elo) {
 
 function buildRoomSummary(room) {
   const standings = buildStandings(room).slice(0, 3).map((item, index) => `${index + 1}. ${item.name} (${item.points} pts)`).join(' | ') || 'Sin clasificación aún';
-  return `${room.name} · Código ${room.code}\nJugadores: ${room.members.length}/${MAX_PLAYERS}\nParejas: ${room.pairsGenerated ? 'Sí' : 'No'} · Jornadas: ${room.scheduleGenerated ? 'Sí' : 'No'}\nTop 3: ${standings}`;
+  return `${room.name} · Código ${room.code}\nJugadores: ${room.members.length}/${MAX_PLAYERS}\nFormato: 1 set libre con empate · Parejas: ${room.pairsGenerated ? 'Sí' : 'No'} · Jornadas: ${room.scheduleGenerated ? 'Sí' : 'No'}\nClasificación parejas: ${standings}`;
 }
 
 function exportState() {
@@ -1294,15 +1355,15 @@ function seedDemoData() {
   generateSchedule(room.id);
 
   const sampleResults = [
-    [6,3,6,4,'',''], [4,6,6,3,6,4], [6,2,6,1,'',''],
-    [7,5,4,6,6,3], [6,4,6,4,'',''], [3,6,4,6,'',''],
-    [6,1,6,2,'',''], [6,4,3,6,6,4], [2,6,2,6,'',''],
-    [6,4,7,5,'',''], [4,6,6,2,6,3], [6,0,6,1,'','']
+    [6,3], [4,6], [6,2],
+    [7,5], [6,4], [3,6],
+    [6,1], [6,4], [2,6],
+    [6,4], [4,6], [6,0]
   ];
 
   room.rounds.flatMap(round => round.matches).forEach((match, index) => {
-    const [a1, b1, a2, b2, a3, b3] = sampleResults[index];
-    saveMatchResult(room.id, match.id, new Map([['a1', a1], ['b1', b1], ['a2', a2], ['b2', b2], ['a3', a3], ['b3', b3]]));
+    const [a1, b1] = sampleResults[index];
+    saveMatchResult(room.id, match.id, new Map([['a1', a1], ['b1', b1]]));
   });
 
   room.chat.push({ id: uid('msg'), userId: room.members[0], text: 'Bienvenidos a la demo 🚀', at: Date.now() });
@@ -1336,27 +1397,36 @@ function generateRoundRobin(teams) {
   return rounds;
 }
 
+
+function undoLastResult(roomId) {
+  const room = getRoom(roomId);
+  if (!room?.lastResultMeta?.matchId) return toast('No hay ningún resultado reciente que deshacer.');
+  clearMatchResult(room.id, room.lastResultMeta.matchId);
+}
+
 function countSets(result) {
-  const setPairs = [['a1','b1'],['a2','b2'],['a3','b3']].map(([a, b]) => [result[a], result[b]]).filter(([a, b]) => a !== '' && b !== '');
-  let setsA = 0, setsB = 0, gamesA = 0, gamesB = 0;
-  setPairs.forEach(([a, b]) => {
-    gamesA += Number(a);
-    gamesB += Number(b);
-    if (a > b) setsA += 1;
-    if (b > a) setsB += 1;
-  });
-  return { setsA, setsB, gamesA, gamesB };
+  const a = result.a1 === '' ? 0 : Number(result.a1);
+  const b = result.b1 === '' ? 0 : Number(result.b1);
+  return {
+    setsA: a > b ? 1 : 0,
+    setsB: b > a ? 1 : 0,
+    gamesA: a,
+    gamesB: b
+  };
 }
 
 function getWinnerFromResult(result) {
-  const { setsA, setsB } = countSets(result);
-  if (setsA === setsB) return null;
-  return setsA > setsB ? 'A' : 'B';
+  const { gamesA, gamesB } = countSets(result);
+  if (gamesA === gamesB) return null;
+  return gamesA > gamesB ? 'A' : 'B';
 }
 
+
 function summarizeResult(result) {
-  return [['a1','b1'],['a2','b2'],['a3','b3']].map(([a, b]) => result[a] !== '' && result[b] !== '' ? `${result[a]}-${result[b]}` : null).filter(Boolean).join(' · ');
+  if (result.a1 === '' || result.b1 === '') return 'Pendiente';
+  return Number(result.a1) === Number(result.b1) ? `${result.a1}-${result.b1} · empate` : `${result.a1}-${result.b1}`;
 }
+
 
 function countCompletedMatches(room) {
   return room.rounds.flatMap(round => round.matches).filter(match => match.result).length;

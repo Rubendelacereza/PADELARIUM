@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#09121f">
-  <title>PadelFlow Ultra Local</title>
+  <title>PadelFlow Admin Mode</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,7 +20,7 @@
 
     <header class="topbar glass" role="banner">
       <div>
-        <p class="eyebrow">PadelFlow Ultra Local</p>
+        <p class="eyebrow">PadelFlow Admin Mode</p>
         <h1>PadelFlow</h1>
       </div>
       <div class="topbar-actions">
@@ -40,12 +40,12 @@
       <section class="hero hero-landing glass">
         <div class="stack-md">
           <span class="hero-chip">Accesible · intuitiva · todo en local</span>
-          <h2>La app de pádel móvil que organiza ligas, sorteos, jornadas y clasificación.</h2>
-          <p>Regístrate, crea salas de hasta 12 personas, genera 6 parejas, monta 4 jornadas automáticas y lleva resultados, estadísticas, logros, ELO y chat desde un único panel.</p>
+          <h2>La app de pádel móvil para organizar parejas, jornadas y clasificación.</h2>
+          <p>Regístrate, crea una sala, añade hasta 12 jugadores, genera 6 parejas, monta 4 jornadas automáticas y lleva todos los resultados desde un único móvil.</p>
           <div class="chip-row">
             <span class="chip">Lista de espera</span>
-            <span class="chip">Podio</span>
-            <span class="chip">Modo PWA</span>
+            <span class="chip">Clasificación por parejas</span>
+            <span class="chip">Un solo set libre</span>
             <span class="chip">Accesibilidad</span>
           </div>
         </div>
@@ -53,7 +53,7 @@
           <div class="metric-card glass-lite"><strong>12</strong><span>Jugadores</span></div>
           <div class="metric-card glass-lite"><strong>6</strong><span>Parejas</span></div>
           <div class="metric-card glass-lite"><strong>4</strong><span>Jornadas</span></div>
-          <div class="metric-card glass-lite"><strong>3</strong><span>Pistas</span></div>
+          <div class="metric-card glass-lite"><strong>1</strong><span>Set libre</span></div>
         </div>
       </section>
 
@@ -61,14 +61,8 @@
         <section class="card glass" aria-labelledby="loginTitle">
           <h3 id="loginTitle">Iniciar sesión</h3>
           <form id="loginForm" class="stack-md" novalidate>
-            <label>
-              <span>Usuario</span>
-              <input name="username" autocomplete="username" required minlength="3" placeholder="Ej. ruben">
-            </label>
-            <label>
-              <span>Contraseña</span>
-              <input name="password" autocomplete="current-password" type="password" required minlength="4" placeholder="••••••••">
-            </label>
+            <label><span>Usuario</span><input name="username" autocomplete="username" required minlength="3" placeholder="Ej. ruben"></label>
+            <label><span>Contraseña</span><input name="password" autocomplete="current-password" type="password" required minlength="4" placeholder="••••••••"></label>
             <button class="btn btn-primary" type="submit">Entrar</button>
           </form>
         </section>
@@ -76,14 +70,8 @@
         <section class="card glass" aria-labelledby="registerTitle">
           <h3 id="registerTitle">Crear cuenta</h3>
           <form id="registerForm" class="stack-md" novalidate>
-            <label>
-              <span>Usuario</span>
-              <input name="username" autocomplete="username" required minlength="3" maxlength="20" placeholder="Mínimo 3 caracteres">
-            </label>
-            <label>
-              <span>Contraseña</span>
-              <input name="password" autocomplete="new-password" type="password" required minlength="4" maxlength="24" placeholder="Mínimo 4 caracteres">
-            </label>
+            <label><span>Usuario</span><input name="username" autocomplete="username" required minlength="3" maxlength="20" placeholder="Mínimo 3 caracteres"></label>
+            <label><span>Contraseña</span><input name="password" autocomplete="new-password" type="password" required minlength="4" maxlength="24" placeholder="Mínimo 4 caracteres"></label>
             <button class="btn btn-secondary" type="submit">Registrarme</button>
           </form>
         </section>
@@ -94,11 +82,7 @@
           <strong>Todo funciona offline y en local</strong>
           <p>Los datos se guardan en este navegador con localStorage. Puedes instalarla como app y exportar o importar el estado cuando quieras.</p>
         </div>
-        <div class="mini-pills">
-          <span>Offline</span>
-          <span>LocalStorage</span>
-          <span>PWA</span>
-        </div>
+        <div class="mini-pills"><span>Offline</span><span>LocalStorage</span><span>PWA</span></div>
       </section>
     </section>
   </template>
@@ -110,7 +94,7 @@
           <div>
             <p class="eyebrow">Lobby principal</p>
             <h2>Salas, accesos rápidos y herramientas</h2>
-            <p>Crea una sala, entra por código, consulta estados y usa herramientas para exportar, importar o cargar una demo de prueba.</p>
+            <p>Crea una sala, entra por código y usa las herramientas locales para guardar una copia o cargar una demo.</p>
           </div>
           <div class="hero-actions">
             <button id="seedDemoBtn" class="btn btn-ghost" type="button">Cargar demo</button>
@@ -123,10 +107,7 @@
         <section class="card glass">
           <h3>Crear sala</h3>
           <form id="createRoomForm" class="stack-md">
-            <label>
-              <span>Nombre de la sala</span>
-              <input name="roomName" required maxlength="30" placeholder="Ej. Liga Sábado Mañana">
-            </label>
+            <label><span>Nombre de la sala</span><input name="roomName" required maxlength="30" placeholder="Ej. Liga Sábado Mañana"></label>
             <button class="btn btn-primary" type="submit">Crear sala</button>
           </form>
         </section>
@@ -134,20 +115,14 @@
         <section class="card glass">
           <h3>Entrar por código</h3>
           <form id="joinByCodeForm" class="stack-md">
-            <label>
-              <span>Código de sala</span>
-              <input name="roomCode" required maxlength="8" placeholder="Ej. PF4K9A">
-            </label>
+            <label><span>Código de sala</span><input name="roomCode" required maxlength="8" placeholder="Ej. PF4K9A"></label>
             <button class="btn btn-secondary" type="submit">Acceder</button>
           </form>
         </section>
       </div>
 
       <section class="card glass stack-md">
-        <div class="section-title-row wrap-mobile">
-          <h3>Herramientas locales</h3>
-          <span class="subtle">Copia de seguridad y reinicio</span>
-        </div>
+        <div class="section-title-row wrap-mobile"><h3>Herramientas locales</h3><span class="subtle">Copia de seguridad y reinicio</span></div>
         <div class="tool-grid-3">
           <button id="exportStateBtn" class="btn btn-ghost" type="button">Exportar datos</button>
           <label class="file-input-btn btn btn-ghost" for="importStateInput">Importar datos</label>
@@ -157,10 +132,7 @@
       </section>
 
       <section class="stack-md">
-        <div class="section-title-row wrap-mobile">
-          <h3>Salas disponibles</h3>
-          <span class="subtle">Vista rápida local</span>
-        </div>
+        <div class="section-title-row wrap-mobile"><h3>Salas disponibles</h3><span class="subtle">Vista rápida local</span></div>
         <div id="roomsList" class="stack-md"></div>
       </section>
     </section>
@@ -190,15 +162,11 @@
         <a href="#pairsSection" class="chip">Parejas</a>
         <a href="#scheduleSection" class="chip">Jornadas</a>
         <a href="#standingsSection" class="chip">Clasificación</a>
-        <a href="#statsSection" class="chip">Estadísticas</a>
-        <a href="#socialSection" class="chip">Chat y avisos</a>
+        <a href="#socialSection" class="chip">Historial y chat</a>
       </nav>
 
       <section id="playersSection" class="card glass stack-md">
-        <div class="section-title-row wrap-mobile">
-          <h3>Jugadores</h3>
-          <span id="capacityBadge" class="capacity-badge"></span>
-        </div>
+        <div class="section-title-row wrap-mobile"><h3>Jugadores</h3><span id="capacityBadge" class="capacity-badge"></span></div>
         <div id="playersGrid" class="players-grid"></div>
       </section>
 
@@ -208,69 +176,43 @@
 
       <div class="grid-two room-grid-bottom">
         <section id="pairsSection" class="card glass stack-md">
-          <div class="section-title-row wrap-mobile">
-            <h3>Parejas</h3>
-            <span class="subtle">Sorteo inicial</span>
-          </div>
+          <div class="section-title-row wrap-mobile"><h3>Parejas</h3><span class="subtle">Sorteo inicial</span></div>
           <div id="pairsList" class="stack-sm"></div>
         </section>
 
         <section id="standingsSection" class="card glass stack-md">
-          <div class="section-title-row wrap-mobile">
-            <h3>Clasificación</h3>
-            <span class="subtle">Podio y tabla</span>
-          </div>
+          <div class="section-title-row wrap-mobile"><h3>Clasificación</h3><span class="subtle">Por parejas</span></div>
           <div id="standingsPodium"></div>
           <div id="standingsTable"></div>
         </section>
       </div>
 
-      <section id="statsSection" class="card glass stack-md">
-        <div class="section-title-row wrap-mobile">
-          <h3>Estadísticas, niveles y logros</h3>
-          <span class="subtle">Rendimiento individual</span>
-        </div>
-        <div id="eloBoard"></div>
-        <div id="playerStatsGrid" class="players-stats-grid"></div>
-      </section>
-
       <section id="scheduleSection" class="card glass stack-md">
-        <div class="section-title-row wrap-mobile">
-          <h3>Jornadas y pistas</h3>
-          <span class="subtle">4 jornadas · 3 pistas · sin rivales repetidos</span>
-        </div>
-        <div id="matchesBoard" class="stack-md"></div>
+        <div class="section-title-row wrap-mobile"><h3>Jornadas y resultados</h3><span class="subtle">Un solo set libre</span></div>
+        <div id="nextPendingWrap"></div>
+        <div id="matchesBoard"></div>
       </section>
 
-      <section class="card glass stack-md">
-        <div class="section-title-row wrap-mobile">
-          <h3>Historial de actividad</h3>
-          <span class="subtle">Acciones recientes</span>
-        </div>
-        <div id="historyFeed" class="history-feed"></div>
-      </section>
-
-      <div id="socialSection" class="grid-two room-grid-bottom">
+      <section id="socialSection" class="grid-two room-grid-bottom">
         <section class="card glass stack-md">
-          <div class="section-title-row wrap-mobile">
-            <h3>Chat de sala</h3>
-            <span class="subtle">Mensajes locales</span>
-          </div>
-          <div id="chatMessages" class="chat-feed"></div>
-          <form id="chatForm" class="chat-form" aria-label="Enviar mensaje al chat">
-            <input name="message" maxlength="180" placeholder="Escribe un mensaje para la sala">
+          <div class="section-title-row wrap-mobile"><h3>Historial</h3><span class="subtle">Últimos cambios</span></div>
+          <div id="historyFeed" class="stack-sm"></div>
+        </section>
+
+        <section class="card glass stack-md">
+          <div class="section-title-row wrap-mobile"><h3>Chat</h3><span class="subtle">Mensajes de sala</span></div>
+          <div id="chatMessages" class="stack-sm"></div>
+          <form id="chatForm" class="chat-form">
+            <input name="message" maxlength="180" placeholder="Escribe un mensaje rápido">
             <button class="btn btn-primary" type="submit">Enviar</button>
           </form>
         </section>
+      </section>
 
-        <section class="card glass stack-md">
-          <div class="section-title-row wrap-mobile">
-            <h3>Centro de avisos</h3>
-            <span class="subtle">Eventos importantes</span>
-          </div>
-          <div id="notificationsFeed" class="history-feed"></div>
-        </section>
-      </div>
+      <section class="card glass stack-md">
+        <div class="section-title-row wrap-mobile"><h3>Avisos</h3><span class="subtle">Centro de avisos</span></div>
+        <div id="notificationsFeed" class="stack-sm"></div>
+      </section>
     </section>
   </template>
 
