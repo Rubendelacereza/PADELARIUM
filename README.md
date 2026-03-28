@@ -1,35 +1,31 @@
-# PadelFlow v3
+# PadelFlow Ultra Local
 
-Demo frontend móvil-first de una app de pádel con diseño premium.
+Web app local de pádel, móvil-first y accesible.
 
-## Novedades añadidas
-- Ranking **ELO individual**
-- **Chat de sala**
-- **Centro de avisos**
-- **MVP por jornada**
-- **Modo claro / oscuro**
-- Base **PWA instalable** con manifest y service worker
+## Incluye
+- usuarios con login local
+- salas con código y máximo 12 jugadores
+- lista de espera
+- confirmación de asistencia
+- creador como administrador
+- sorteo de 6 parejas una vez por torneo
+- modo parejas aleatorio o balanceado por ELO
+- 4 jornadas con 3 pistas sin rivales repetidos
+- registro y borrado de resultados
+- clasificación individual
+- ELO, niveles y logros
+- MVP por jornada
+- chat, avisos e historial
+- exportar/importar backup local
+- demo precargable
+- PWA instalable y funcionamiento offline básico
 
-## Mantiene lo anterior
-- Registro e inicio de sesión
-- Salas con código e invitación
-- Máximo 12 jugadores
-- Lista de espera
-- Confirmación de asistencia
-- 6 parejas aleatorias
-- 4 jornadas con 3 pistas y rivales no repetidos
-- Registro de resultados
-- Clasificación y estadísticas individuales
-- Historial de actividad
-- Cambio de admin, expulsar jugadores y rehacer torneo antes de resultados
-
-## Cómo usarla
+## Uso
 1. Abre `index.html`.
-2. Crea usuarios.
-3. Crea una sala o entra por código.
-4. Llena la sala hasta 12 jugadores.
-5. Genera parejas y jornadas.
-6. Sube resultados y revisa clasificación, ELO, chat y avisos.
+2. Regístrate o entra.
+3. Crea una sala o usa la demo.
+4. Para generar parejas necesitas 12 jugadores y todos confirmados.
+5. Después crea las jornadas y registra resultados.
 
 ## Nota
-Sigue siendo una demo local con `localStorage`, sin backend real ni sincronización online entre varios móviles.
+Todo funciona en localStorage. No hay backend ni sincronización online real entre dispositivos.

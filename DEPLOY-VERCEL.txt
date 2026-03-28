@@ -1,0 +1,1 @@
+Sube esta carpeta a Vercel. Framework Preset: Other. Root Directory: ./
